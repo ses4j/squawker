@@ -3,6 +3,7 @@
 import asyncio
 from collections import defaultdict
 from datetime import datetime
+import re
 import time
 from datetime import datetime, timedelta
 import discord
@@ -19,13 +20,13 @@ GUILD = os.getenv('DISCORD_GUILD')
 dc_channel = None
 dc_area_channel = None
 
-TESTING=not os.getenv('IS_DOCKER') 
+print(f"IS_DOCKER: {os.getenv('IS_DOCKER')}")
+TESTING = not os.getenv('IS_DOCKER')
 if TESTING:
     dc_channel = 1158230242452836485
     dc_area_channel = 1158582890628657213
 else:
-    dc_channel = 1158584504965943406 #1149672933875265658
-    # /1158584504965943406
+    dc_channel = 1158584504965943406
     dc_area_channel = 1158589088350359553
 
 assert TOKEN
@@ -36,6 +37,7 @@ intents.message_content = True
 client = discord.Client(intents=intents)
 logger = logging.getLogger('discord')
 
+
 @client.event
 async def on_ready():
     print(f'We have logged in as {client.user}')
@@ -45,70 +47,76 @@ async def on_ready():
     if dc_channel:
         client.loop.create_task(background_task(region_code='US-DC', channel_id=dc_channel, session=session))
     if dc_area_channel:
-        client.loop.create_task(background_task2(lat=38.887732, lng=-77.039092, dist_km=35.0, channel_id=dc_area_channel, session=session))
-
+        client.loop.create_task(
+            background_task2(lat=38.887732, lng=-77.039092, dist_km=35.0, channel_id=dc_area_channel, session=session)
+        )
 
 
 async def background_task(channel_id, region_code='US-DC', session=None):
     await client.wait_until_ready()
     channel = client.get_channel(channel_id)
     assert channel, f"Couldn't find channel {channel_id}"
-    await channel.send(f"Hi!  RBA Squawker reporting for duty on {region_code}!")
+    # await channel.send(f"Hi!  RBA Squawker reporting for duty on {region_code}!")
+
+    posted_checklists = await _get_recently_posted_checklists(channel)
     known_reports = []
     last_seen = {}
     while not client.is_closed():
-        results_data = ebird.get_notable_birds(region_code=region_code, num_days_back=1)
+        try:
+            results_data = ebird.get_notable_birds(region_code=region_code, num_days_back=1)
 
-        for msg in ebird.get_notable_birds_text(results_data, known_reports, last_seen, session=session):
-            await channel.send(msg)
-            await asyncio.sleep(0.1)
+            for msg in ebird.get_notable_birds_text(results_data, known_reports, last_seen, posted_checklists, session=session):
+                await channel.send(msg)
+                await asyncio.sleep(0.1)
 
-        logger.info("Sleeping...")
-        await asyncio.sleep(60*3)
+            logger.info("Sleeping...")
+        except Exception as e:
+            logger.exception(f"Error in get_notable_birds({region_code})")
+        await asyncio.sleep(60 * 3)
+
+async def _get_recently_posted_checklists(channel):
+    posted_checklists = set()
+    async for msg in channel.history(limit=100):
+            if client.user != msg.author:
+                continue
+            m = re.search('https://ebird.org/checklist/([a-zA-Z0-9]+)', msg.content)
+            if m:
+                checklist_id = m.group(1)
+                posted_checklists.add(checklist_id)
+    return posted_checklists
+
 
 async def background_task2(channel_id, lat, lng, dist_km, session=None):
     await client.wait_until_ready()
     channel = client.get_channel(channel_id)
     assert channel, f"Couldn't find channel {channel_id}"
-    await channel.send(f"Hi!  RBA Squawker reporting for duty on {lat}, {lng}!")
+    # await channel.send(f"Hi!  RBA Squawker reporting for duty on {lat}, {lng}!")
+
+    posted_checklists = await _get_recently_posted_checklists(channel)
     known_reports = []
     last_seen = {}
     while not client.is_closed():
-        results_data = ebird.get_notable_birds_by_latlng(lat, lng, dist_km, num_days_back=1)
+        try:
+            results_data = ebird.get_notable_birds_by_latlng(lat, lng, dist_km, num_days_back=1)
 
-        for msg in ebird.get_notable_birds_text(results_data, known_reports, last_seen, session=session):
-            await channel.send(msg)
-            await asyncio.sleep(0.1)
+            for msg in ebird.get_notable_birds_text(results_data, known_reports, last_seen, posted_checklists, session=session):
+                await channel.send(msg)
+                await asyncio.sleep(0.1)
 
-        logger.info("Sleeping...")
-        await asyncio.sleep(60*3)
+            logger.info("Sleeping...")
+        except Exception as e:
+            logger.exception(f"Error in get_notable_birds_by_latlng({lat}, {lng})")
+        await asyncio.sleep(60 * 3)
 
-@client.event
-async def on_message(message):
-    print(message.author, client.user, message.content)
-    if message.author == client.user:
-        return
 
-    url = 'https://api.ebird.org/v2/data/obs/US-DC/recent/notable?back=1&detail=full'
+# @client.event
+# async def on_message(message):
+#     print(message.author, client.user, message.content)
+#     if message.author == client.user:
+#         return
 
-    for msg in ebird.get_rare_text():
-        await message.channel.send(msg)
-        await asyncio.sleep(0.1)
-
-# logging.getLogger('discord').setLevel(logging.INFO)
-# logging.getLogger('discord.http').setLevel(logging.INFO)
-# # handler = logging.handlers.RotatingFileHandler(
-# #     filename='discord.log',
-# #     encoding='utf-8',
-# #     maxBytes=32 * 1024 * 1024,  # 32 MiB
-# #     backupCount=5,  # Rotate through 5 files
-# # )
-# # set up a console logger
-# handler = logging.StreamHandler()
-# handler.setLevel(logging.DEBUG)
-# dt_fmt = '%Y-%m-%d %H:%M:%S'
-# formatter = logging.Formatter('[{asctime}] [{levelname:<8}] {name}: {message}', dt_fmt, style='{')
-# handler.setFormatter(formatter)
-# logger.addHandler(handler)
+# for msg in ebird.get_rare_text():
+#     await message.channel.send(msg)
+#     await asyncio.sleep(0.1)
 
 client.run(TOKEN)

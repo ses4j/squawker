@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 import functools
 import time
 from datetime import datetime, timedelta
@@ -10,6 +10,7 @@ import discord
 import os
 from dotenv import load_dotenv
 import logging,re
+import pytz
 
 
 load_dotenv()
@@ -217,8 +218,14 @@ def get_notable_birds_by_latlng(lat, lng, dist_km, num_days_back=2):
     assert r.status_code == 200, r.text
     return r.json()
 
+def interpret_naive_as_local(naive_dt):
+    return pytz.timezone('US/Eastern').localize(naive_dt)
 
-def get_notable_birds_text(results_data, known_reports, last_seen, session):
+def now():
+    return datetime.now(timezone.utc).astimezone()
+    
+
+def get_notable_birds_text(results_data, known_reports, last_seen, posted_checklists, session):
     ctr = 0
     for r in reversed(results_data):
         if r['obsId'] in known_reports:
@@ -229,19 +236,22 @@ def get_notable_birds_text(results_data, known_reports, last_seen, session):
         known_reports.append(r['obsId'])
 
         key = (r['comName'], r['locName'])
-        dt = datetime.strptime(r['obsDt'], "%Y-%m-%d %H:%M")
+        dt = interpret_naive_as_local(datetime.strptime(r['obsDt'], "%Y-%m-%d %H:%M"))
 
         checklisturl = f"https://ebird.org/checklist/{r['subId']}"
         locationurl = f"https://ebird.org/hotspot/{r['locId']}"
-        ago = (datetime.now() - dt).total_seconds() / 60
+        ago = (now() - dt).total_seconds() / 60
         ago = f"{ago:.0f}m ago" if ago < 60 else f"{ago/60:.0f}h ago"
 
-        freq = get_bird_sighting_frequency(r['comName'], datetime.now(), area=r['subnational2Code'] or r['subnational1Code'], session=session)
-        freq = f"{freq*100:.1f}%"
+        try:
+            freq = get_bird_sighting_frequency(r['comName'], now(), area=r['subnational2Code'] or r['subnational1Code'], session=session)
+            freq = f"{freq*100:.1f}%"
+        except KeyError:
+            freq = '_never_'
 
         msg = f"**{r['comName']}**, [{r['locName']}](<{locationurl}>) @ [{r['obsDt']}](<{checklisturl}>) ({ago}, {freq}) h/t *{r['userDisplayName']}*."
 
-        if datetime.now() - dt > timedelta(hours=REPORT_IS_TOO_OLD_AFTER_HOURS):
+        if now() - dt > timedelta(hours=REPORT_IS_TOO_OLD_AFTER_HOURS):
             logger.info(f"Skipping too-old report: {msg}")
             continue
 
@@ -254,14 +264,19 @@ def get_notable_birds_text(results_data, known_reports, last_seen, session):
                 logger.info(f"Skipping already-reported: {msg}")
                 continue
 
-        if is_continuing:
-            logger.info("Found continuing bird!")
-        else:
-            logger.info("Found new bird!")
         if dt > last_seen[key]:
             last_seen[key] = dt
 
         msg = "Continuing " + msg if is_continuing else msg
+        if r['subId'] in posted_checklists:
+            # this is so i don't repeat recently posted history when restarting...
+            logger.info(f"Skipping already-posted checklist: {msg}")
+            continue
+        elif is_continuing:
+            logger.info(f"Found continuing bird: {msg}")
+        else:
+            logger.info(f"Found new bird: {msg}")
+
         yield msg
 
 
@@ -336,4 +351,4 @@ if __name__ == '__main__':
     session = ebird.session
 
     h = get_all_histogram_data(session=session)
-    print(get_bird_sighting_frequency("Blackpoll Warbler", datetime.now(), area='US-DC', session=session))
+    print(get_bird_sighting_frequency("Blackpoll Warbler", now(), area='US-DC', session=session))
