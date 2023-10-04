@@ -6,10 +6,11 @@ from datetime import datetime, timezone
 import functools
 import time
 from datetime import datetime, timedelta
+from typing import Any, Collection
 import discord
 import os
 from dotenv import load_dotenv
-import logging,re
+import logging, re
 import pytz
 
 
@@ -35,7 +36,7 @@ class EBirdClient(object):
     def _login(username, password):
         s = requests.Session()
 
-        print(f'Logging in as {username}...')    
+        print(f'Logging in as {username}...')
         r = s.get('http://ebird.org/ebird/MyEBird?cmd=Start', allow_redirects=True)
         m = re.search(r'<input type=\"hidden\" name=\"lt\" value=\"([^"]+)\"', r.text)
         lt = m.group(1)
@@ -49,6 +50,15 @@ class EBirdClient(object):
         assert r.status_code == 200
         print(f'Logged in successfully.')
 
+        return s
+
+def ellipse(s, max_chars=2900):
+    if not s:
+        return s
+
+    if len(s) > max_chars:
+        return s[:max_chars] + "..."
+    else:
         return s
 
 
@@ -72,13 +82,13 @@ def _get_histogram_indexes(date_quarter_index, include_nearby_samples=0):
 # @functools.lru_cache(maxsize=20000)
 def get_bird_sighting_frequency(
     species_full_name,
-    date_value: datetime|None=None,
+    date_value: datetime | None = None,
     date_quarter_index=None,
     area="US-DC",
     include_nearby_samples=1,
     session=None,
 ):
-    """ Get the % likelihood that a given species is reported at a given time. 
+    """Get the % likelihood that a given species is reported at a given time.
     Time can be specified by a datetime.date in `date_value` XOR an int `date_quarter_index` (0-3).
     """
 
@@ -92,19 +102,14 @@ def get_bird_sighting_frequency(
     total = 0.0
     sightings = 0.0
     for idx in _get_histogram_indexes(date_quarter_index, include_nearby_samples):
-        sightings += (
-            histogram_data[species_full_name][idx] * histogram_data.sample_sizes[idx]
-        )
+        sightings += histogram_data[species_full_name][idx] * histogram_data.sample_sizes[idx]
         total += histogram_data.sample_sizes[idx]
 
     return sightings / total
 
 
-
-def fetch_data(
-    url, filename, expires=None, headers=None, require_200=True, session=None
-):
-    """ Fetch (and cache) `url` into filename. """
+def fetch_data(url, filename, expires=None, headers=None, require_200=True, session=None):
+    """Fetch (and cache) `url` into filename."""
 
     if not os.path.exists(cache_path):
         os.mkdir(cache_path)
@@ -119,9 +124,7 @@ def fetch_data(
         if require_200:
             # if data.status_code != 200:
             #     import pdb; pdb.set_trace()
-            assert data.status_code == 200, "{} - {}".format(
-                data.status_code, data.text
-            )
+            assert data.status_code == 200, "{} - {}".format(data.status_code, data.text)
         assert data.headers['Content-Type'] != 'text/html;charset=UTF-8', data.text
 
         with open(filepath, "w", encoding="utf-8") as f:
@@ -141,9 +144,7 @@ def get_all_histogram_data(area="US-DC", session=None):
         pass
 
     # url = "http://ebird.org/ebird/BarChart?cmd=getChart&displayType=download&getLocations=states&states={}&bYear=2006&eYear=2016&bMonth=1&eMonth=12&reportType=location&".format(area)
-    url = "https://ebird.org/barchartData?r={}&bmo=1&emo=12&byr=2016&eyr=2022&fmt=tsv".format(
-        area
-    )
+    url = "https://ebird.org/barchartData?r={}&bmo=1&emo=12&byr=2016&eyr=2022&fmt=tsv".format(area)
     # import pdb; pdb.set_trace()
 
     data = fetch_data(
@@ -218,15 +219,75 @@ def get_notable_birds_by_latlng(lat, lng, dist_km, num_days_back=2):
     assert r.status_code == 200, r.text
     return r.json()
 
+
+def get_checklist_info(subId: str):
+    url = f"https://api.ebird.org/v2/product/checklist/view/{subId}"
+    r = requests.get(url, headers={'X-eBirdApiToken': os.getenv('EBIRD_TOKEN')})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+def get_info_about_sighting(subId:str, obsId: str) -> dict[str, Any] | None:
+    data = get_checklist_info(subId)
+    obses = data.pop('obs')
+    # import pprint; pprint.pprint(data)
+    dur = data.get('durationHrs')
+    for obs in obses:
+        if obs['obsId'] == obsId:
+            obs['durationHrs'] = dur
+            return obs
+    return None
+
+    # obs = {
+    #   "speciesCode": "cacgoo1",
+    #   "hideFlags": [],
+    #   "obsDt": "2018-01-04 18:29",
+    #   "subnational1Code": "US-NY",
+    #   "howManyAtleast": 1,
+    #   "howManyAtmost": 1,
+    #   "howManyStr": "1",
+    #   "present": false,
+    #   "projId": "EBIRD",
+    #   "subId": "S29893687",
+    #   "obsId": "OBS406047820",
+    #   "obsAux": [
+    #     {
+    #       "subId": "S29893687",
+    #       "obsId": "OBS406047820",
+    #       "speciesCode": "cacgoo1",
+    #       "fieldName": "breeding_code",
+    #       "entryMethodCode": "ebird_breeding",
+    #       "auxCode": "UN",
+    #       "value": "C4"
+    #     }
+    #   ]
+    # }
+
+    
+
+
 def interpret_naive_as_local(naive_dt):
     return pytz.timezone('US/Eastern').localize(naive_dt)
 
+
 def now():
     return datetime.now(timezone.utc).astimezone()
-    
 
-def get_notable_birds_text(results_data, known_reports, last_seen, posted_checklists, session):
+
+def get_notable_birds_text(
+    results_data,
+    known_reports: list[str] | None= None,
+    last_seen: dict[tuple[str, str], datetime] | None= None,
+    posted_checklists: Collection[str] |None= None,
+    session: requests.Session | None = None,
+):
     ctr = 0
+    if known_reports is None:
+        known_reports = []
+    if last_seen is None:
+        last_seen = {}
+    if posted_checklists is None:
+        posted_checklists = set()
+
     for r in reversed(results_data):
         if r['obsId'] in known_reports:
             continue
@@ -243,13 +304,35 @@ def get_notable_birds_text(results_data, known_reports, last_seen, posted_checkl
         ago = (now() - dt).total_seconds() / 60
         ago = f"{ago:.0f}m ago" if ago < 60 else f"{ago/60:.0f}h ago"
 
-        try:
-            freq = get_bird_sighting_frequency(r['comName'], now(), area=r['subnational2Code'] or r['subnational1Code'], session=session)
-            freq = f"{freq*100:.1f}%"
-        except KeyError:
-            freq = '_never_'
+        if session:
+            try:
+                freq = get_bird_sighting_frequency(
+                    r['comName'], now(), area=r['subnational2Code'] or r['subnational1Code'], session=session
+                )
+                freq = f"{freq*100:.1f}%"
+            except KeyError:
+                freq = '_never_'
+        else:
+            freq = ''
 
-        msg = f"**{r['comName']}**, [{r['locName']}](<{locationurl}>) @ [{r['obsDt']}](<{checklisturl}>) ({ago}, {freq}) h/t *{r['userDisplayName']}*."
+        obs = get_info_about_sighting(r['subId'], r['obsId'])
+        comments:str|None = obs.get('comments')
+        howManyStr = obs.get('howManyStr')
+        durationHrs = obs.get('durationHrs')
+        # import pprint
+        # pprint.pprint(obs)
+        howmany =''
+        if howManyStr:
+            try:
+                howmany = int(howManyStr)
+                if howmany > 1:
+                    howmany = f" x{howmany}"
+            except:
+                pass
+
+        msg = f"**{r['comName']}**{howmany}, [{r['locName']}](<{locationurl}>) @ [{r['obsDt']}](<{checklisturl}>) ({ago}, {freq}) h/t *{r['userDisplayName']}*."
+        if comments:
+            msg += "\n> " + ellipse(comments.strip(), 255)
 
         if now() - dt > timedelta(hours=REPORT_IS_TOO_OLD_AFTER_HOURS):
             logger.info(f"Skipping too-old report: {msg}")
@@ -268,6 +351,7 @@ def get_notable_birds_text(results_data, known_reports, last_seen, posted_checkl
             last_seen[key] = dt
 
         msg = "Continuing " + msg if is_continuing else msg
+
         if r['subId'] in posted_checklists:
             # this is so i don't repeat recently posted history when restarting...
             logger.info(f"Skipping already-posted checklist: {msg}")
@@ -280,7 +364,7 @@ def get_notable_birds_text(results_data, known_reports, last_seen, posted_checkl
         yield msg
 
 
-def get_rare_text(region_code='US-DC', num_days_back=2):
+def get_rare_text(region_code='US-DC', num_days_back=7):
     results_data = get_notable_birds(region_code=region_code, num_days_back=num_days_back)
 
     rets = defaultdict(list)
@@ -336,19 +420,15 @@ def get_rare_text(region_code='US-DC', num_days_back=2):
     return ret
 
 
-# regionCode = 'US-DC'
-# url = f'https://api.ebird.org/v2/product/stats/{regionCode}/2023/10/1'
-# r = requests.get(url, headers={'X-eBirdApiToken': os.getenv('EBIRD_TOKEN')})
-# print(r.json())
-
 if __name__ == '__main__':
-    # results_data = get_notable_birds(region_code='US-DC', num_days_back=7)
+    REPORT_IS_TOO_OLD_AFTER_HOURS = 1000
+    results_data = get_notable_birds(region_code='US-DC', num_days_back=7)
     # print(results_data)
-    # for msg in get_notable_birds_text(results_data, [], {}):
-    #     print(msg)
+    for msg in get_notable_birds_text(results_data):
+        print(msg)
 
-    ebird = EBirdClient(os.getenv('EBIRD_USERNAME'), os.getenv('EBIRD_PASSWORD'))
-    session = ebird.session
+    # ebird = EBirdClient(os.getenv('EBIRD_USERNAME'), os.getenv('EBIRD_PASSWORD'))
+    # session = ebird.session
 
-    h = get_all_histogram_data(session=session)
-    print(get_bird_sighting_frequency("Blackpoll Warbler", now(), area='US-DC', session=session))
+    # h = get_all_histogram_data(session=session)
+    # print(get_bird_sighting_frequency("Blackpoll Warbler", now(), area='US-DC', session=session))
