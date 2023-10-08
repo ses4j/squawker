@@ -30,6 +30,7 @@ cache_path = "_cache1"
 class EBirdClient(object):
     def __init__(self, username, password):
         self.username = username
+        assert self.username, 'need username'
         self.session = self._login(username, password)
 
     @staticmethod
@@ -51,6 +52,7 @@ class EBirdClient(object):
         print(f'Logged in successfully.')
 
         return s
+
 
 def ellipse(s, max_chars=2900):
     if not s:
@@ -226,7 +228,8 @@ def get_checklist_info(subId: str):
     assert r.status_code == 200, r.text
     return r.json()
 
-def get_info_about_sighting(subId:str, obsId: str) -> dict[str, Any] | None:
+
+def get_info_about_sighting(subId: str, obsId: str) -> dict[str, Any] | None:
     data = get_checklist_info(subId)
     obses = data.pop('obs')
     # import pprint; pprint.pprint(data)
@@ -262,8 +265,6 @@ def get_info_about_sighting(subId:str, obsId: str) -> dict[str, Any] | None:
     #   ]
     # }
 
-    
-
 
 def interpret_naive_as_local(naive_dt):
     return pytz.timezone('US/Eastern').localize(naive_dt)
@@ -275,9 +276,9 @@ def now():
 
 def get_notable_birds_text(
     results_data,
-    known_reports: list[str] | None= None,
-    last_seen: dict[tuple[str, str], datetime] | None= None,
-    posted_checklists: Collection[str] |None= None,
+    known_reports: list[str] | None = None,
+    last_seen: dict[tuple[str, str], datetime] | None = None,
+    posted_checklists: Collection[str] | None = None,
     session: requests.Session | None = None,
 ):
     ctr = 0
@@ -316,12 +317,12 @@ def get_notable_birds_text(
             freq = ''
 
         obs = get_info_about_sighting(r['subId'], r['obsId'])
-        comments:str|None = obs.get('comments')
+        comments: str | None = obs.get('comments')
         howManyStr = obs.get('howManyStr')
         durationHrs = obs.get('durationHrs')
         # import pprint
         # pprint.pprint(obs)
-        howmany =''
+        howmany = ''
         if howManyStr:
             try:
                 howmany = int(howManyStr)
