@@ -6,5 +6,5 @@ python bot.py
 
 ### docker
 
-docker build -t my-bot .
-docker run -it --rm --name my-running-bot my-bot
+cd /mnt/user/birdpix/squawk-discord-bot
+./buildrun.sh

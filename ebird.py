@@ -26,6 +26,8 @@ global _histogram_data_cache
 _histogram_data_cache = {}
 cache_path = "_cache1"
 
+year = datetime.now().year
+tenyearsago = year-10
 
 class EBirdClient(object):
     def __init__(self, username, password):
@@ -146,11 +148,11 @@ def get_all_histogram_data(area="US-DC", session=None):
         pass
 
     # url = "http://ebird.org/ebird/BarChart?cmd=getChart&displayType=download&getLocations=states&states={}&bYear=2006&eYear=2016&bMonth=1&eMonth=12&reportType=location&".format(area)
-    url = "https://ebird.org/barchartData?r={}&bmo=1&emo=12&byr=2016&eyr=2022&fmt=tsv".format(area)
+    url = f"https://ebird.org/barchartData?r={area}&bmo=1&emo=12&byr={tenyearsago}&eyr={year}&fmt=tsv"
     # import pdb; pdb.set_trace()
 
     data = fetch_data(
-        url, "histogram-data-{}.tsv".format(area), require_200=False, session=session
+        url, f"histogram-data-{area}-{tenyearsago}-{year}.tsv", require_200=False, session=session
     )  # sometimes these dont work.
     if not data:
         raise RuntimeError("bad histogram data.")
@@ -274,6 +276,10 @@ def now():
     return datetime.now(timezone.utc).astimezone()
 
 
+def markup_url(text, url):
+    # [{r['locName']}](<{locationurl}>)
+    return f"[{text}](<{url}>)"
+
 def get_notable_birds_text(
     results_data,
     known_reports: list[str] | None = None,
@@ -307,10 +313,12 @@ def get_notable_birds_text(
 
         if session:
             try:
+                region_code = r['subnational2Code'] or r['subnational1Code']
                 freq = get_bird_sighting_frequency(
-                    r['comName'], now(), area=r['subnational2Code'] or r['subnational1Code'], session=session
+                    r['comName'], now(), area=region_code, session=session
                 )
                 freq = f"{freq*100:.1f}%"
+                freq = markup_url(freq, f"https://ebird.org/barchart?r={region_code}&bmo=1&emo=12&byr={tenyearsago}&eyr={year}&spp={r['speciesCode']}")
             except KeyError:
                 freq = '_never_'
         else:
@@ -328,10 +336,12 @@ def get_notable_birds_text(
                 howmany = int(howManyStr)
                 if howmany > 1:
                     howmany = f" x{howmany}"
+                else:
+                    howmany = ''
             except:
                 pass
 
-        msg = f"**{r['comName']}**{howmany}, [{r['locName']}](<{locationurl}>) @ [{r['obsDt']}](<{checklisturl}>) ({ago}, {freq}) h/t *{r['userDisplayName']}*."
+        msg = f"**{r['comName']}**{howmany}, {markup_url(r['locName'], locationurl)} @ {markup_url(r['obsDt'], checklisturl)} ({ago}, {freq}) h/t *{r['userDisplayName']}*."
         if comments:
             msg += "\n> " + ellipse(comments.strip(), 255)
 
