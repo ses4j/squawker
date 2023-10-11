@@ -5,18 +5,29 @@ from collections import defaultdict
 from datetime import datetime
 import re
 import sys
-import time
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 import logging
+import fourletter
 
 import discord
 
-# from discord import Webhook, AsyncWebhookAdapter
 from discord.ext import commands
 
 import ebird
+
+import random
+
+salutations = [
+    'my boy!',
+    'friend.',
+    'my good man or woman.',
+    'my dude.',
+    'bestie!',
+    'young bird padawan.',
+]
+
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -39,21 +50,22 @@ assert TOKEN
 intents = discord.Intents.default()
 intents.message_content = True
 
-# client = discord.Client(intents=intents)
 logger = logging.getLogger('discord')
 
+class MyBot(discord.ext.commands.Bot):
+    async def on_ready(self):
+        await self.tree.sync(guild=GUILD)
 
-bot = commands.Bot(
+bot = MyBot(
     command_prefix="!",
     intents=intents,
     description="Squawker! Your friendly neighbord bird-bot.",
 )
-# bot._ignore_list = data_utils.get_filter_wordlist()
-
 
 @bot.event
 async def on_ready():
     print(f'We have logged in as {bot.user}')
+    await bot.tree.sync(guild=discord.Object(id=GUILD))
 
     try:
         session = ebird.EBirdClient(os.getenv('EBIRD_USERNAME'), os.getenv('EBIRD_PASSWORD')).session
@@ -130,50 +142,60 @@ async def background_task2(channel_id, lat, lng, dist_km, session=None):
         await asyncio.sleep(60 * 3)
 
 
-# @bot.event
-# async def on_message(message):
-#     print(message.author, bot.user, message.content)
-#     if message.author == bot.user:
-#         return
+@bot.event
+async def on_message(message):
+    print(f"{message.author}: {message.channel.name} {message.content}")
+    if message.author == bot.user:
+        return
 
+    await bot.process_commands(message)
 
-# for msg in ebird.get_rare_text():
-#     await message.channel.send(msg)
-#     await asyncio.sleep(0.1)
-import random
+@bot.tree.command(guild=discord.Object(id=GUILD))
+async def whats(ctx, code_or_name: str):
+    """Look up the meaning of a 4 or 6 letter banding code or find the code for a bird.
 
-salutations = [
-    'my boy!',
-    'friend.',
-    'buddy.',
-    'my dude.',
-    'bestie!',
-    'young bird padawan.',
-    'child.',
-]
+    /whats BANO
+        returns Barn Owl
+    /whats Barn
+        returns BANO 
+    
+    Parameters
+    -----------
+    code_or_name: str
+        If all CAPS, look up the common species name.  Otherwise, search by prefix for banding codes for birds.
 
+    """
+    async def respond(msg):
+        return await ctx.response.send_message(msg)
 
-@bot.command()
-async def whats(ctx, *input: str):
-    """Look up a 4 letter bird code."""
-    logger.info(f"whats: {input}")
-    code = " ".join([str(c) for c in input]).lower()
-    import fourletter
+    input = code_or_name
+    search_by_code = input.upper() == input
+
+    code = input.lower()
+    logger.info(f"/whats '{input}' ('{code}')")
+    if input == 'updog' or input == 'up dog':
+        await respond("Not much, whats up with you?")
+        return
 
     if len(code) < 3:
         msg = "Please provide at least 3 characters."
-        await ctx.send(msg)
+        await respond(msg)
         return
 
-    if len(code) == 6 or len(code) == 4:
-        common_name = fourletter.get_common_name_by_code(code)
-        if not common_name:
-            msg = "Sorry, I don't know that code."
+    if search_by_code:
+        if len(code) == 6 or len(code) == 4:
+            common_name = fourletter.get_common_name_by_code(code)
+            if not common_name:
+                msg = "Sorry, I don't know that code."
+            else:
+                salutation = random.choice(salutations)
+                msg = f"`{code_or_name}` is the code for **{common_name}**, {salutation}"
+            await respond(msg)
+            return
         else:
-            salutation = random.choice(salutations)
-            msg = f"{code} is the code for **{common_name}**, {salutation}"
-        await ctx.send(msg)
-        return
+            msg = "Please provide a 4 or 6 letter code."
+            await respond(msg)
+            return
     else:
         results = []
         MAX_RESULTS = 5
@@ -182,14 +204,15 @@ async def whats(ctx, *input: str):
             results.append(msg)
 
         if not results:
-            msg = "Sorry, I can't find any matching birds."
-            await ctx.send(msg)
+            msg = f"Sorry, I can't find any matching birds for {code_or_name}"
+            await respond(msg)
         else:
-            for msg in results[:MAX_RESULTS]:
-                await ctx.send(msg)
-                await asyncio.sleep(0.1)
+            msg = "\n".join(results[:MAX_RESULTS])
             if len(results) > MAX_RESULTS:
-                await ctx.send("...there are the first 5 results, but there are more.")
+                msg += "\n...there are the first 5 results, but there are more."
+            # for msg in results[:MAX_RESULTS]:
+            await respond(msg)
+                # await asyncio.sleep(0.1)
 
 
 bot.run(TOKEN)
