@@ -74,11 +74,13 @@ async def on_ready():
 
 
 async def background_task(channel_id, region_code='US-DC', session=None):
+    logger.info(f"Just started background_task({channel_id}, {region_code})...")
     await bot.wait_until_ready()
     channel = bot.get_channel(channel_id)
     assert channel, f"Couldn't find channel {channel_id}"
     # await channel.send(f"Hi!  RBA Squawker reporting for duty on {region_code}!")
 
+    logger.info(f"({channel_id}, {region_code}) ready. Getting recent posts.")
     posted_checklists = await _get_recently_posted_checklists(channel)
     known_reports = []
     last_seen = {}
