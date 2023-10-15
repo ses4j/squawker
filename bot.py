@@ -19,19 +19,9 @@ import ebird
 
 import random
 
-salutations = [
-    'my boy!',
-    'friend.',
-    'my good man or woman.',
-    'my dude.',
-    'bestie!',
-    'young bird padawan.',
-]
-
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
-GUILD = os.getenv('DISCORD_GUILD')
 
 dc_channel = None
 dc_area_channel = None
@@ -41,9 +31,11 @@ TESTING = not os.getenv('IS_DOCKER')
 if TESTING:
     dc_channel = 1158230242452836485
     dc_area_channel = 1158582890628657213
+    GUILD = 1158230241869836311
 else:
     dc_channel = 1158584504965943406
     dc_area_channel = 1158589088350359553
+    GUILD = 1149672933875265658
 
 assert TOKEN
 
@@ -61,6 +53,7 @@ bot = MyBot(
     intents=intents,
     description="Squawker! Your friendly neighbord bird-bot.",
 )
+
 
 @bot.event
 async def on_ready():
@@ -144,7 +137,7 @@ async def background_task2(channel_id, lat, lng, dist_km, session=None):
 
 @bot.event
 async def on_message(message):
-    print(f"{message.author}: {message.channel.name} {message.content}")
+    print(f"{message.author}: {message.channel} {message.content}")
     if message.author == bot.user:
         return
 
@@ -166,7 +159,7 @@ async def whats(ctx, code_or_name: str):
 
     """
     async def respond(msg):
-        return await ctx.response.send_message(msg)
+        await ctx.response.send_message(msg, ephemeral=True)
 
     input = code_or_name
     search_by_code = input.upper() == input
@@ -188,8 +181,8 @@ async def whats(ctx, code_or_name: str):
             if not common_name:
                 msg = "Sorry, I don't know that code."
             else:
-                salutation = random.choice(salutations)
-                msg = f"`{code_or_name}` is the code for **{common_name}**, {salutation}"
+                # salutation = random.choice(salutations)
+                msg = f"`{code_or_name}` is the code for **{common_name}**."
             await respond(msg)
             return
         else:
