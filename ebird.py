@@ -307,10 +307,16 @@ def get_notable_birds_text(
         dt = interpret_naive_as_local(datetime.strptime(r['obsDt'], "%Y-%m-%d %H:%M"))
 
         checklisturl = f"https://ebird.org/checklist/{r['subId']}"
-        locationurl = f"https://ebird.org/hotspot/{r['locId']}"
+
+        if r['locationPrivate']:
+            locationurl = f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"    
+        else:
+            locationurl = f"https://ebird.org/hotspot/{r['locId']}"
         ago = (now() - dt).total_seconds() / 60
         ago = f"{ago:.0f}m ago" if ago < 60 else f"{ago/60:.0f}h ago"
 
+        if r['comName'] == 'Hooded Warbler':
+            breakpoint()
         if session:
             try:
                 region_code = r['subnational2Code'] or r['subnational1Code']
