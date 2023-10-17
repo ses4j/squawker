@@ -17,8 +17,7 @@ from discord.ext import commands
 
 import ebird
 
-import random
-
+logger = logging.getLogger('bot')
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -32,6 +31,8 @@ if TESTING:
     dc_channel = 1158230242452836485
     dc_area_channel = 1158582890628657213
     GUILD = 1158230241869836311
+    dc_channel = None
+    dc_area_channel = None
 else:
     dc_channel = 1158584504965943406
     dc_area_channel = 1158589088350359553
@@ -42,11 +43,13 @@ assert TOKEN
 intents = discord.Intents.default()
 intents.message_content = True
 
-logger = logging.getLogger('discord')
+# logger = logging.getLogger('discord')
+
 
 class MyBot(discord.ext.commands.Bot):
     async def on_ready(self):
         await self.tree.sync(guild=GUILD)
+
 
 bot = MyBot(
     command_prefix="!",
@@ -145,29 +148,46 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
+
 @bot.tree.command(guild=discord.Object(id=GUILD))
-async def whats(ctx, code_or_name: str):
-    """Look up the meaning of a 4 or 6 letter banding code or find the code for a bird.
+async def what(ctx, code_or_name: str):
+    """Look up the meaning of a 4 or 6 letter banding code or find the code for a bird by common name.
 
     /whats BANO
         returns Barn Owl
     /whats Barn
-        returns BANO 
-    
+        returns BANO
+
     Parameters
     -----------
     code_or_name: str
-        If all CAPS, look up the common species name.  Otherwise, search by prefix for banding codes for birds.
+        4 or 6 letter banding code OR part of a species common name.
 
     """
+
+    return await bird_code_lookup_impl(ctx, code_or_name)
+
+
+@bot.tree.command(guild=discord.Object(id=GUILD))
+async def whats(ctx, code_or_name: str):
+    """DEPRECATED, renamed to /what to avoid mobile autocorrect issues.
+    """
+    return await bird_code_lookup_impl(ctx, code_or_name)
+
+
+async def bird_code_lookup_impl(ctx, code_or_name: str):
     async def respond(msg):
         await ctx.response.send_message(msg, ephemeral=True)
 
     input = code_or_name
-    search_by_code = input.upper() == input
+    search_by_code = input.upper() == input or len(input) == 4 or len(input) == 6
+    search_by_desc = input.upper() != input
 
     code = input.lower()
-    logger.info(f"/whats '{input}' ('{code}')")
+    user_desc = f"{ctx.user.name}#{ctx.user.discriminator}/{ctx.user.global_name}" if ctx.user else 'Unknown User'
+    logger.info(
+        f"/whats '{input}': {user_desc} {'from #' + ctx.channel.name if ctx.channel else ''}{'@' + ctx.guild.name if ctx.guild else ''}".strip()
+    )
     if input == 'updog' or input == 'up dog':
         await respond("Not much, whats up with you?")
         return
@@ -177,37 +197,72 @@ async def whats(ctx, code_or_name: str):
         await respond(msg)
         return
 
+    full_response = []
+    found_search_by_code = False
     if search_by_code:
         if len(code) == 6 or len(code) == 4:
             common_name = fourletter.get_common_name_by_code(code)
-            if not common_name:
-                msg = "Sorry, I don't know that code."
-            else:
-                # salutation = random.choice(salutations)
+            if common_name:
                 msg = f"`{code_or_name}` is the code for **{common_name}**."
-            await respond(msg)
-            return
-        else:
-            msg = "Please provide a 4 or 6 letter code."
-            await respond(msg)
-            return
-    else:
+                found_search_by_code = True
+                full_response.append(msg)
+        # else:
+        #     msg = "Please provide a 4 or 6 letter code."
+        #     full_response.append(msg)
+
+    if search_by_desc:
         results = []
         MAX_RESULTS = 5
         for code4, comname in fourletter.code_by_common_name_substring(code, max_items=MAX_RESULTS + 1):
             msg = f"{code4} is the code for **{comname}**."
             results.append(msg)
 
-        if not results:
-            msg = f"Sorry, I can't find any matching birds for {code_or_name}"
-            await respond(msg)
-        else:
+        if results:
             msg = "\n".join(results[:MAX_RESULTS])
             if len(results) > MAX_RESULTS:
                 msg += "\n...there are the first 5 results, but there are more."
-            # for msg in results[:MAX_RESULTS]:
-            await respond(msg)
-                # await asyncio.sleep(0.1)
+            full_response.append(msg)
+
+    if search_by_code and not found_search_by_code:
+        if not full_response:
+            full_response.insert(0, "I was unable to find any matches.")
+        else:
+            full_response.insert(
+                0, "I was unable to find any bird codes that match, but you did match some bird names:"
+            )
+
+    if not full_response:
+        msg = f"Sorry, I can't find any matching birds for {code_or_name}"
+        full_response.append(msg)
+
+    msg = "\n".join(full_response)
+    await respond(msg)
 
 
-bot.run(TOKEN)
+def configure_logging():
+    import logging
+    import logging.handlers
+
+    logging.getLogger('discord').setLevel(logging.INFO)
+    logging.getLogger('bot').setLevel(logging.DEBUG)
+
+    fileHandler = logging.handlers.RotatingFileHandler(
+        filename='discord.log',
+        encoding='utf-8',
+        maxBytes=32 * 1024 * 1024,  # 32 MiB
+        backupCount=5,  # Rotate through 5 files
+    )
+    dt_fmt = '%Y-%m-%d %H:%M:%S'
+    formatter = logging.Formatter('[{asctime}] [{levelname:<8}] {name}: {message}', dt_fmt, style='{')
+    fileHandler.setFormatter(formatter)
+
+    streamHandler = logging.StreamHandler()
+    streamHandler.setFormatter(discord.utils._ColourFormatter())
+
+    rootLogger = logging.getLogger()
+    rootLogger.addHandler(fileHandler)
+    rootLogger.addHandler(streamHandler)
+
+
+configure_logging()
+bot.run(TOKEN, log_handler=None)
