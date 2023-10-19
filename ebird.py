@@ -19,7 +19,7 @@ load_dotenv()
 
 import requests
 
-logger = logging.getLogger('discord')
+logger = logging.getLogger('bot.ebird')
 REPORT_IS_TOO_OLD_AFTER_HOURS = 24
 
 global _histogram_data_cache
@@ -37,9 +37,10 @@ class EBirdClient(object):
 
     @staticmethod
     def _login(username, password):
+        logger.debug('starting login...')
         s = requests.Session()
 
-        print(f'Logging in as {username}...')
+        logger.debug(f'Logging in as {username}...')
         r = s.get('http://ebird.org/ebird/MyEBird?cmd=Start', allow_redirects=True)
         m = re.search(r'<input type=\"hidden\" name=\"lt\" value=\"([^"]+)\"', r.text)
         lt = m.group(1)
@@ -51,7 +52,7 @@ class EBirdClient(object):
         )
 
         assert r.status_code == 200
-        print(f'Logged in successfully.')
+        logger.debug(f'Logged in successfully.')
 
         return s
 

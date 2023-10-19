@@ -23,19 +23,20 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 dc_channel = None
-dc_area_channel = None
+baltimore_channel = None
 
 print(f"IS_DOCKER: {os.getenv('IS_DOCKER')}")
 TESTING = not os.getenv('IS_DOCKER')
+# TESTING = False
 if TESTING:
     dc_channel = 1158230242452836485
-    dc_area_channel = 1158582890628657213
+    baltimore_channel = 1158582890628657213
     GUILD = 1158230241869836311
-    dc_channel = None
-    dc_area_channel = None
+    # dc_channel = None
+    baltimore_channel = None
 else:
     dc_channel = 1158584504965943406
-    dc_area_channel = 1158589088350359553
+    baltimore_channel = 1164330245789327380
     GUILD = 1149672933875265658
 
 assert TOKEN
@@ -60,28 +61,99 @@ bot = MyBot(
 
 @bot.event
 async def on_ready():
-    print(f'We have logged in as {bot.user}')
+    logger.info(f'We have started bot code as {bot.user}, loading guild {GUILD}: {bot.get_guild(GUILD).name}')
     await bot.tree.sync(guild=discord.Object(id=GUILD))
+    logger.info(f'We have synced tree to {GUILD}')
 
     try:
         session = ebird.EBirdClient(os.getenv('EBIRD_USERNAME'), os.getenv('EBIRD_PASSWORD')).session
     except:
+        logger.exception("Error logging into ebird")
         sys.exit(1)
+    logger.debug('successfully logged into ebird')
     assert session
+
     if dc_channel:
-        bot.loop.create_task(background_task(region_code='US-DC', channel_id=dc_channel, session=session))
-    if dc_area_channel:
         bot.loop.create_task(
-            background_task2(lat=38.887732, lng=-77.039092, dist_km=35.0, channel_id=dc_area_channel, session=session)
+            poll_ebird_notables_by_region_code_task(region_code='US-DC', channel_id=dc_channel, session=session)
         )
+    await asyncio.sleep(1.0)
+    if baltimore_channel:
+        bot.loop.create_task(
+            poll_ebird_notables_by_region_code_task(
+                region_code='US-MD-005', channel_id=baltimore_channel, session=session
+            )
+        )
+    # background_task2(lat=38.887732, lng=-77.039092, dist_km=35.0, channel_id=dc_metro, session=session)
 
+def display_channel_perms(channel):
+    def print_perms(name, channel, role):
+        print(name)
+        perms = channel.overwrites_for(role)
+        for k, v in perms:
+            if v is not None:
+                print(f'{k}={v},')
+        print()
 
-async def background_task(channel_id, region_code='US-DC', session=None):
-    logger.info(f"Just started background_task({channel_id}, {region_code})...")
+    print('channel', channel.name)
+    print()
+    print_perms('member', channel, member_role)
+    print_perms('bot_role', channel, bot_role)
+    print_perms('moderator_role', channel, moderator_role)
+
+async def poll_ebird_notables_by_region_code_task(channel_id, region_code='US-DC', session=None):
     await bot.wait_until_ready()
     channel = bot.get_channel(channel_id)
     assert channel, f"Couldn't find channel {channel_id}"
     # await channel.send(f"Hi!  RBA Squawker reporting for duty on {region_code}!")
+    logger.info(f"Just started poll_ebird_notables_by_region_code_task: {channel_id} {channel.name} - {region_code}...")
+
+    roles = {x.name: x for x in bot.get_guild(GUILD).roles}
+    bot_username = bot.user.name
+    member_role = roles['member']
+    moderator_role = roles['moderator']
+    bot_role = roles[bot_username]
+
+    logger.debug('setting perms for bot...')
+    # await channel.set_permissions(
+    #     bot_role,
+    #     manage_roles=True,
+    #     external_emojis=True,
+    #     create_public_threads=True,
+    #     manage_threads=True,
+    #     mention_everyone=True,
+    #     use_embedded_activities=True,
+    #     external_stickers=True,
+    #     manage_messages=True,
+    #     send_messages_in_threads=True,
+    #     add_reactions=True,
+    #     attach_files=True,
+    #     send_messages=True,
+    #     embed_links=True,
+    #     read_message_history=True,
+    # )
+    logger.debug('setting perms for moderator...')
+    # await channel.set_permissions(
+    #     moderator_role,
+    #     read_messages=True,
+    #     manage_channels=True,
+    #     create_public_threads=True,
+    #     create_instant_invite=True,
+    #     manage_webhooks=True,
+    #     send_messages_in_threads=True,
+    #     send_messages=True,
+    # )
+    await channel.set_permissions(
+        member_role,
+        send_messages=False, # this is the big one.  We don't want to allow members to post in the channel.
+        external_emojis=True,
+        create_public_threads=True,
+        use_application_commands=True,
+        send_messages_in_threads=True,
+        add_reactions=True,
+        attach_files=True,
+        embed_links=True,
+    )
 
     logger.info(f"({channel_id}, {region_code}) ready. Getting recent posts.")
     posted_checklists = await _get_recently_posted_checklists(channel)
@@ -115,7 +187,7 @@ async def _get_recently_posted_checklists(channel):
     return posted_checklists
 
 
-async def background_task2(channel_id, lat, lng, dist_km, session=None):
+async def poll_ebird_notables_by_lat_lng_task(channel_id, lat, lng, dist_km, session=None):
     await bot.wait_until_ready()
     channel = bot.get_channel(channel_id)
     assert channel, f"Couldn't find channel {channel_id}"
@@ -170,8 +242,7 @@ async def what(ctx, code_or_name: str):
 
 @bot.tree.command(guild=discord.Object(id=GUILD))
 async def whats(ctx, code_or_name: str):
-    """DEPRECATED, renamed to /what to avoid mobile autocorrect issues.
-    """
+    """DEPRECATED, renamed to /what to avoid mobile autocorrect issues."""
     return await bird_code_lookup_impl(ctx, code_or_name)
 
 
