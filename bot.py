@@ -86,6 +86,7 @@ async def on_ready():
         )
     # background_task2(lat=38.887732, lng=-77.039092, dist_km=35.0, channel_id=dc_metro, session=session)
 
+
 def display_channel_perms(channel):
     def print_perms(name, channel, role):
         print(name)
@@ -101,7 +102,9 @@ def display_channel_perms(channel):
     print_perms('bot_role', channel, bot_role)
     print_perms('moderator_role', channel, moderator_role)
 
+
 async def poll_ebird_notables_by_region_code_task(channel_id, region_code='US-DC', session=None):
+    logger = logging.getLogger('bot.' + region_code)
     await bot.wait_until_ready()
     channel = bot.get_channel(channel_id)
     assert channel, f"Couldn't find channel {channel_id}"
@@ -145,7 +148,7 @@ async def poll_ebird_notables_by_region_code_task(channel_id, region_code='US-DC
     # )
     await channel.set_permissions(
         member_role,
-        send_messages=False, # this is the big one.  We don't want to allow members to post in the channel.
+        send_messages=False,  # this is the big one.  We don't want to allow members to post in the channel.
         external_emojis=True,
         create_public_threads=True,
         use_application_commands=True,
@@ -155,31 +158,35 @@ async def poll_ebird_notables_by_region_code_task(channel_id, region_code='US-DC
         embed_links=True,
     )
 
-    logger.info(f"({channel_id}, {region_code}) ready. Getting recent posts.")
+    logger.info(f"({channel_id}, {region_code}) ready. Getting recent posts...")
     posted_checklists = await _get_recently_posted_checklists(channel)
+    logger.info(f"({channel_id}, {region_code}) ready. Recent posts retrieved: {','.join(posted_checklists)}")
     known_reports = []
     last_seen = {}
     while not bot.is_closed():
         try:
             results_data = ebird.get_notable_birds(region_code=region_code, num_days_back=1)
-
+            logger.debug(f"Currently {len(results_data)} items in notable list.")
             for msg in ebird.get_notable_birds_text(
                 results_data, known_reports, last_seen, posted_checklists, session=session
             ):
                 await channel.send(msg)
                 await asyncio.sleep(0.1)
 
-            logger.info("Sleeping...")
+            # logger.info("Sleeping...")
         except Exception as e:
             logger.exception(f"Error in get_notable_birds({region_code})")
         await asyncio.sleep(60 * 3)
+    logger.warning("Bot closed!")
 
 
 async def _get_recently_posted_checklists(channel):
     posted_checklists = set()
     async for msg in channel.history(limit=100):
         if bot.user != msg.author:
+            logger.debug(f"Ignoring message {msg.id} {msg.author}: {msg.content}")
             continue
+        logger.debug(f"Checking message {msg.id} {msg.author}: {msg.content}")
         m = re.search('https://ebird.org/checklist/([a-zA-Z0-9]+)', msg.content)
         if m:
             checklist_id = m.group(1)
@@ -199,17 +206,18 @@ async def poll_ebird_notables_by_lat_lng_task(channel_id, lat, lng, dist_km, ses
     while not bot.is_closed():
         try:
             results_data = ebird.get_notable_birds_by_latlng(lat, lng, dist_km, num_days_back=1)
-
+            logger.debug(f"Currently {len(results_data)} items in notable list.")
             for msg in ebird.get_notable_birds_text(
                 results_data, known_reports, last_seen, posted_checklists, session=session
             ):
                 await channel.send(msg)
                 await asyncio.sleep(0.1)
 
-            logger.info("Sleeping...")
+            # logger.info("Sleeping...")
         except Exception as e:
             logger.exception(f"Error in get_notable_birds_by_latlng({lat}, {lng})")
         await asyncio.sleep(60 * 3)
+    logger.warning("Bot closed!")
 
 
 @bot.event

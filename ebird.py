@@ -27,7 +27,22 @@ _histogram_data_cache = {}
 cache_path = "_cache1"
 
 year = datetime.now().year
-tenyearsago = year-10
+tenyearsago = year - 10
+from html.parser import HTMLParser
+
+
+class FormParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.execution_value = None
+
+    def handle_starttag(self, tag, attrs):
+        # Check if the tag is 'input' and has name='execution'
+        if tag == 'input':
+            attr_dict = dict(attrs)
+            if attr_dict.get('name') == 'execution':
+                self.execution_value = attr_dict.get('value')
+
 
 class EBirdClient(object):
     def __init__(self, username, password):
@@ -41,17 +56,37 @@ class EBirdClient(object):
         s = requests.Session()
 
         logger.debug(f'Logging in as {username}...')
-        r = s.get('http://ebird.org/ebird/MyEBird?cmd=Start', allow_redirects=True)
-        m = re.search(r'<input type=\"hidden\" name=\"lt\" value=\"([^"]+)\"', r.text)
-        lt = m.group(1)
+        r = s.get('https://ebird.org/myebird/US', allow_redirects=True)
+        # breakpoint()
+        # m = re.search(r'<input type=\"hidden\" name=\"lt\" value=\"([^"]+)\"', r.text)
+        # lt = m.group(1)
+
+        parser = FormParser()
+        parser.feed(r.text)
+
+        assert parser.execution_value
+        # breakpoint()
+        # m = re.search(r'<input type=\"hidden\" name=\"execution\" value=\"([^"]+)\"', r.text)
+        # execution = m.group(1)
+
+        payload = {
+            # "service": "https://ebird.org/login/cas?portal=ebird",
+            "locale": "en_US",
+            "username": username,
+            "password": password,
+            "rememberMe": "on",  # Checkbox is checked
+            "execution": parser.execution_value,
+            "_eventId": "submit",
+        }
 
         r = s.post(
             r.url,
-            data={'username': username, 'password': password, 'lt': lt, 'execution': 'e1s1', '_eventId': 'submit'},
+            data=payload,
+            # data={'username': username, 'password': password, 'lt': lt, 'execution': 'e1s1', '_eventId': 'submit'},
             allow_redirects=True,
         )
 
-        assert r.status_code == 200
+        assert r.status_code == 200, f"Login failed: {r.status_code} - {r.text}"
         logger.debug(f'Logged in successfully.')
 
         return s
@@ -281,6 +316,7 @@ def markup_url(text, url):
     # [{r['locName']}](<{locationurl}>)
     return f"[{text}](<{url}>)"
 
+
 def get_notable_birds_text(
     results_data,
     known_reports: list[str] | None = None,
@@ -310,7 +346,7 @@ def get_notable_birds_text(
         checklisturl = f"https://ebird.org/checklist/{r['subId']}"
 
         if r['locationPrivate']:
-            locationurl = f"https://www.google.com/maps/search/?api=1&query={r['lat']},{r['lng']}"    
+            locationurl = f"https://www.google.com/maps/search/?api=1&query={r['lat']},{r['lng']}"
         else:
             locationurl = f"https://ebird.org/hotspot/{r['locId']}"
         ago = (now() - dt).total_seconds() / 60
@@ -319,11 +355,12 @@ def get_notable_birds_text(
         if session:
             try:
                 region_code = r['subnational2Code'] or r['subnational1Code']
-                freq = get_bird_sighting_frequency(
-                    r['comName'], now(), area=region_code, session=session
-                )
+                freq = get_bird_sighting_frequency(r['comName'], now(), area=region_code, session=session)
                 freq = f"{freq*100:.1f}%"
-                freq = markup_url(freq, f"https://ebird.org/barchart?r={region_code}&bmo=1&emo=12&byr={tenyearsago}&eyr={year}&spp={r['speciesCode']}")
+                freq = markup_url(
+                    freq,
+                    f"https://ebird.org/barchart?r={region_code}&bmo=1&emo=12&byr={tenyearsago}&eyr={year}&spp={r['speciesCode']}",
+                )
             except KeyError:
                 freq = '_never_'
         else:
@@ -437,6 +474,8 @@ def get_rare_text(region_code='US-DC', num_days_back=7):
 
 
 if __name__ == '__main__':
+    ebird = EBirdClient(os.getenv('EBIRD_USERNAME'), os.getenv('EBIRD_PASSWORD'))
+
     REPORT_IS_TOO_OLD_AFTER_HOURS = 1000
     results_data = get_notable_birds(region_code='US-DC', num_days_back=7)
     # print(results_data)
