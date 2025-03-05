@@ -13,4 +13,4 @@ else
 fi
 
 sleep 1
-docker run -it --rm --name $CONTAINER_NAME $IMAGE_NAME
+docker run -itd --rm --name $CONTAINER_NAME $IMAGE_NAME

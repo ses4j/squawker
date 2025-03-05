@@ -10,6 +10,7 @@ import os
 from dotenv import load_dotenv
 import logging
 import fourletter
+import discord.ext.commands
 
 import discord
 
