@@ -49,8 +49,32 @@ intents.message_content = True
 
 
 class MyBot(discord.ext.commands.Bot):
+    async def setup_hook(self):
+        await self.tree.sync(guild=discord.Object(id=GUILD))
+        logger.info(f'Synced command tree to guild {GUILD}')
+
+        try:
+            session = ebird.EBirdClient(os.getenv('EBIRD_USERNAME'), os.getenv('EBIRD_PASSWORD')).session
+        except:
+            logger.exception("Error logging into ebird")
+            sys.exit(1)
+        logger.debug('successfully logged into ebird')
+        assert session
+
+        if dc_channel:
+            asyncio.create_task(
+                poll_ebird_notables_by_region_code_task(region_code='US-DC', channel_id=dc_channel, session=session)
+            )
+        if baltimore_channel:
+            asyncio.create_task(
+                poll_ebird_notables_by_region_code_task(
+                    region_code='US-MD-005', channel_id=baltimore_channel, session=session
+                )
+            )
+
     async def on_ready(self):
-        await self.tree.sync(guild=GUILD)
+        guild = self.get_guild(GUILD)
+        logger.info(f'Logged in as {self.user}, guild {GUILD}: {guild.name if guild else "unknown"}')
 
 
 bot = MyBot(
@@ -58,34 +82,6 @@ bot = MyBot(
     intents=intents,
     description="Squawker! Your friendly neighbord bird-bot.",
 )
-
-
-@bot.event
-async def on_ready():
-    logger.info(f'We have started bot code as {bot.user}, loading guild {GUILD}: {bot.get_guild(GUILD).name}')
-    await bot.tree.sync(guild=discord.Object(id=GUILD))
-    logger.info(f'We have synced tree to {GUILD}')
-
-    try:
-        session = ebird.EBirdClient(os.getenv('EBIRD_USERNAME'), os.getenv('EBIRD_PASSWORD')).session
-    except:
-        logger.exception("Error logging into ebird")
-        sys.exit(1)
-    logger.debug('successfully logged into ebird')
-    assert session
-
-    if dc_channel:
-        bot.loop.create_task(
-            poll_ebird_notables_by_region_code_task(region_code='US-DC', channel_id=dc_channel, session=session)
-        )
-    await asyncio.sleep(1.0)
-    if baltimore_channel:
-        bot.loop.create_task(
-            poll_ebird_notables_by_region_code_task(
-                region_code='US-MD-005', channel_id=baltimore_channel, session=session
-            )
-        )
-    # background_task2(lat=38.887732, lng=-77.039092, dist_km=35.0, channel_id=dc_metro, session=session)
 
 
 def display_channel_perms(channel):
